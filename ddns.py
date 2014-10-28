@@ -1,3 +1,29 @@
+"""
+
+General help:
+
+to run from the commandline:
+
+  python -m pyfooware.ddns godaddy
+
+run with -h for a list of options
+
+
+GoDaddy help:
+
+to update GoDaddy DNS, first create the file $HOME/.godaddyrc with the
+following three properties:
+
+    username=myuser
+    password=mypass
+    domains=domain1.com,domain2.org
+
+the following updates GoDaddy and logs output to syslog (good for cron)
+
+  python -m pyfooware.ddns godaddy -L
+
+"""
+
 import network
 import os.path
 import sys
