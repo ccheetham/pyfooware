@@ -16,11 +16,11 @@ following three properties:
 
     username=myuser
     password=mypass
-    domains=domain1.com,domain2.org
+    hosts=@.domain1.com,www.domain2.org
 
 the following updates GoDaddy and logs output to syslog (good for cron)
 
-  python -m pyfooware.ddns godaddy -L
+  python -m pyfooware.ddns godaddy -l
 
 """
 
@@ -66,13 +66,6 @@ class DNSProvider(object):
 
 
 class GoDaddy(DNSProvider):
-    """
-    sample ~/.godaddyrc
-
-    username=myuser
-    password=mypass
-    hosts=@.domain1.com,www.domain2.org,...
-    """
 
     def __init__(self, config_path=None, syslog_ident=None):
         DNSProvider.__init__(self, syslog_ident)
