@@ -17,18 +17,18 @@ class DDNSError(Exception):
 
 class DNSProvider(object):
 
-    def __init__(self, logging, syslog_ident):
-        self.logging_on = logging
-        self.syslogging_on = bool(syslog_ident)
+    def __init__(self, syslog_ident):
         if syslog_ident:
+            self.syslogging_on = True
             syslog.openlog(syslog_ident, facility=syslog.LOG_USER)
+        else:
+            self.syslogging_on = False
 
     def update(self):
         pass
 
     def log(self, message):
-        if self.logging_on:
-            print message
+        print message
         if self.syslogging_on:
             syslog.syslog(syslog.LOG_ALERT, message)
 
@@ -45,11 +45,11 @@ class GoDaddy(DNSProvider):
 
     username=myuser
     password=mypass
-    domains=domain1.com,domain2.org
+    hosts=@.domain1.com,www.domain2.org,...
     """
 
-    def __init__(self, config_path=None, logging=False, syslog_ident=None):
-        DNSProvider.__init__(self, logging, syslog_ident)
+    def __init__(self, config_path=None, syslog_ident=None):
+        DNSProvider.__init__(self, syslog_ident)
         self.config_path = config_path
         if not self.config_path:
             self.config_path = os.path.expanduser("~/.godaddyrc")
@@ -87,56 +87,63 @@ class GoDaddy(DNSProvider):
             msg = "no godaddy password configured"
             self.error(msg)
             raise DDNSError(msg)
-        self.domains = filter(lambda d: d != '',
-                props.get("domains", "").split(","))
-        if not self.domains:
-            msg = "no godaddy domains not configured"
+        self.hosts = filter(lambda d: d != '', props.get("hosts", "").split(","))
+        if not self.hosts:
+            msg = "no godaddy hosts configured"
             self.error(msg)
             raise DDNSError(msg)
 
     def update(self):
-        wan_ip = network.Network().get_wan_ip()
+        try:
+            wan_ip = network.Network().get_wan_ip()
+        except Exception as e:
+            raise DDNSError('error getting WAN IP', e)
         self.log("router wan ip is " + wan_ip)
         godaddy = pygodaddy.GoDaddyClient()
         if not godaddy.login(self.username, self.password):
             msg = "godaddy login failure for " + self.username
             self.error(msg)
             raise DDNSError(msg)
-        for domain in self.domains:
-            for rec in godaddy.find_dns_records(domain):
-                if not rec.hostname == "@":
-                    continue
-                if rec.value == wan_ip:
-                    self.log("%s: already set to %s" % (domain, wan_ip))
-                    continue
-                self.log("%s: updating from %s to %s" %
-                        (domain, rec.value, wan_ip))
-                if not godaddy.update_dns_record(domain, wan_ip):
-                    msg = "failed to update %s dns record" % domain
-                    self.error(msg)
-                    raise DDNSError(msg)
+        for host in self.hosts:
+            name, domain = host.split(".", 1)
+            recs = godaddy.find_dns_records(domain)
+            if recs:
+                for rec in recs:
+                    if rec.hostname != name:
+                        continue
+                    if rec.value == wan_ip:
+                        self.log("%s already set to %s, skipping" % (host, wan_ip))
+                    else:
+                        self.log("updating %s from %s to %s" %
+                                (host, rec.value, wan_ip))
+                        dns_entry = domain if name == "@" else host
+                        if not godaddy.update_dns_record(dns_entry, wan_ip):
+                            self.log("failed to update %s dns record" % dns_entry)
+                    break
+                else:
+                    self.log("no record found for %s" % host)
+            else:
+                self.log("no records for %s" % host)
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("provider",
-            metavar="name",
+            metavar="provider",
             help="dns provider name")
     parser.add_argument("-l", "--log",
             dest="logging",
             action="store_true",
-            help="log to stdout")
-    parser.add_argument("-L", "--syslog",
-            metavar="ident",
+            help="log to syslog")
+    parser.add_argument("-i", "--ident",
+            metavar="name",
             dest="syslog_ident",
             nargs="?",
-            help="log to syslog (ident defaults to ddns_<provider>)")
+            help="syslog identifier (default: ddns_<provider>)")
     args = parser.parse_args(sys.argv[1:])
     try:
-        name = sys.argv[1]
-        provider = None
-        if name == "godaddy":
+        if args.provider == "godaddy":
             try:
                 import pygodaddy
             except ImportError as e:
@@ -144,12 +151,15 @@ if __name__ == "__main__":
                         "https://pygodaddy.readthedocs.org/"
                 print >> sys.stderr, msg
                 raise DDNSError(msg)
-            ident = args.syslog_ident
-            if not ident:
-                ident = "ddns_" + args.provider
-            provider = GoDaddy(logging=args.logging, syslog_ident=ident)
-        if not provider:
-            msg = "unknown dns provider: " + name
+            if args.logging:
+                ident = args.syslog_ident
+                if not args.syslog_ident:
+                    ident = "ddns_" + args.provider
+            else:
+                ident=None
+            provider = GoDaddy(syslog_ident=ident)
+        else:
+            msg = "unknown dns provider: " + args.provider
             print >> sys.stderr, msg
             raise DDNSError(msg)
         provider.update()
